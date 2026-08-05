@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -24,6 +25,10 @@
         <button class="nav-item" data-view="create">
           <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
           New Payment
+        </button>
+        <button class="nav-item" data-view="analytics">
+          <svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg>
+          Analytics
         </button>
       </nav>
       <div class="sidebar-footer">
@@ -66,6 +71,12 @@
             <button class="tab" data-status="COMPLETED">Completed</button>
             <button class="tab" data-status="FAILED">Failed</button>
           </div>
+          <select id="risk-filter" class="risk-filter-select">
+            <option value="">All Risks</option>
+            <option value="LOW">Low Risk</option>
+            <option value="MEDIUM">Medium Risk</option>
+            <option value="HIGH">High Risk</option>
+          </select>
           <button class="btn btn-ghost" id="btn-refresh" title="Refresh">⟳</button>
         </div>
 
@@ -78,12 +89,13 @@
                 <th>Amount</th>
                 <th>To</th>
                 <th>Status</th>
+                <th>Risk</th>
                 <th>Created</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="payments-tbody">
-              <tr><td colspan="7" class="empty-state">Loading payments…</td></tr>
+              <tr><td colspan="8" class="empty-state">Loading payments…</td></tr>
             </tbody>
           </table>
         </div>
@@ -96,24 +108,55 @@
         <header class="view-header">
           <div>
             <h1>New Payment</h1>
-            <p class="subtitle">Send money via UPI, Card or Net Banking</p>
+            <p class="subtitle">Initiate a domestic or international payment</p>
           </div>
         </header>
 
         <div class="create-card">
-          <div class="method-tabs" id="method-tabs">
-            <button class="method-tab active" data-method="UPI">
-              <span class="method-icon">📱</span> UPI
+          <p class="section-label">1. Select Payment Type</p>
+          <div class="payment-type-cards" id="payment-type-cards">
+            <button type="button" class="type-card" data-type="DOMESTIC">
+              <span class="type-check">✓</span>
+              <span class="type-icon">🏠</span>
+              <span class="type-title">Domestic Payment</span>
+              <span class="type-desc">Send money within India via UPI, NEFT, RTGS or IMPS</span>
             </button>
-            <button class="method-tab" data-method="CARD">
-              <span class="method-icon">💳</span> Card
-            </button>
-            <button class="method-tab" data-method="NETBANKING">
-              <span class="method-icon">🏦</span> Net Banking
+            <button type="button" class="type-card" data-type="INTERNATIONAL">
+              <span class="type-check">✓</span>
+              <span class="type-icon">🌍</span>
+              <span class="type-title">International Payment</span>
+              <span class="type-desc">Send money abroad via SWIFT or Wire Transfer</span>
             </button>
           </div>
 
-          <form id="payment-form" novalidate>
+          <div class="channel-section hidden" id="channel-section">
+            <p class="section-label">2. Select Payment Channel</p>
+            <div class="channel-cards hidden" id="channel-cards-domestic" data-group="DOMESTIC">
+              <button type="button" class="channel-card" data-channel="UPI">
+                <span class="channel-icon">📱</span> UPI
+              </button>
+              <button type="button" class="channel-card" data-channel="NEFT">
+                <span class="channel-icon">🏦</span> NEFT
+              </button>
+              <button type="button" class="channel-card" data-channel="RTGS">
+                <span class="channel-icon">🏛️</span> RTGS
+              </button>
+              <button type="button" class="channel-card" data-channel="IMPS">
+                <span class="channel-icon">⚡</span> IMPS
+              </button>
+            </div>
+            <div class="channel-cards hidden" id="channel-cards-international" data-group="INTERNATIONAL">
+              <button type="button" class="channel-card" data-channel="SWIFT">
+                <span class="channel-icon">🌐</span> SWIFT Transfer
+              </button>
+              <button type="button" class="channel-card" data-channel="WIRE_TRANSFER">
+                <span class="channel-icon">💸</span> Wire Transfer
+              </button>
+            </div>
+          </div>
+
+          <form id="payment-form" class="hidden" novalidate>
+            <p class="section-label">3. Payment Details</p>
             <div class="form-grid">
               <div class="form-group">
                 <label>Amount</label>
@@ -125,70 +168,66 @@
               </div>
               <div class="form-group">
                 <label>Currency</label>
-                <select id="f-currency">
-                  <option value="INR">INR — Indian Rupee</option>
-                  <option value="USD">USD — US Dollar</option>
-                  <option value="EUR">EUR — Euro</option>
-                  <option value="GBP">GBP — British Pound</option>
-                  <option value="AED">AED — UAE Dirham</option>
-                  <option value="SGD">SGD — Singapore Dollar</option>
-                </select>
+                <select id="f-currency"></select>
               </div>
               <div class="form-group">
-                <label>Source Account</label>
+                <label id="label-source">Source Account</label>
                 <input type="text" id="f-source" placeholder="e.g. ACC1001" required />
                 <small class="error-text" id="err-source"></small>
               </div>
               <div class="form-group">
-                <label>Destination Account</label>
+                <label id="label-destination">Destination Account</label>
                 <input type="text" id="f-destination" placeholder="e.g. ACC2002" required />
                 <small class="error-text" id="err-destination"></small>
               </div>
 
-              <!-- UPI fields -->
-              <div class="form-group method-fields" data-for="UPI">
-                <label>UPI ID (VPA)</label>
-                <input type="text" id="f-upi-id" placeholder="name@bank" />
-                <small class="error-text" id="err-upi"></small>
+              <!-- Sender / Beneficiary bank (NEFT, RTGS, IMPS, SWIFT, WIRE_TRANSFER) -->
+              <div class="form-group channel-fields hidden" data-for="NEFT,RTGS,IMPS,SWIFT,WIRE_TRANSFER">
+                <label>Sender Bank</label>
+                <select id="f-sender-bank"></select>
+              </div>
+              <div class="form-group channel-fields hidden" data-for="NEFT,RTGS,IMPS,SWIFT,WIRE_TRANSFER">
+                <label>Beneficiary Bank</label>
+                <select id="f-beneficiary-bank"></select>
               </div>
 
-              <!-- Card fields -->
-              <div class="form-group method-fields hidden" data-for="CARD">
-                <label>Card Number</label>
-                <input type="text" id="f-card-number" placeholder="1234 5678 9012 3456" maxlength="19" />
-                <small class="error-text" id="err-card-number"></small>
-              </div>
-              <div class="form-group method-fields hidden" data-for="CARD">
-                <label>Cardholder Name</label>
-                <input type="text" id="f-card-name" placeholder="John Doe" />
-              </div>
-              <div class="form-group method-fields hidden" data-for="CARD">
-                <label>Expiry (MM/YYYY)</label>
-                <input type="text" id="f-card-expiry" placeholder="12/2028" maxlength="7" />
-              </div>
-              <div class="form-group method-fields hidden" data-for="CARD">
-                <label>CVV</label>
-                <input type="password" id="f-card-cvv" placeholder="123" maxlength="4" />
+              <!-- IFSC (NEFT, RTGS, IMPS) -->
+              <div class="form-group channel-fields hidden" data-for="NEFT,RTGS,IMPS">
+                <label>IFSC Code</label>
+                <input type="text" id="f-ifsc" placeholder="e.g. HDFC0001234" maxlength="11" />
+                <small class="error-text" id="err-ifsc"></small>
               </div>
 
-              <!-- NetBanking fields -->
-              <div class="form-group method-fields hidden" data-for="NETBANKING">
-                <label>Bank Name</label>
-                <select id="f-bank-name">
-                  <option value="State Bank of India">State Bank of India</option>
-                  <option value="HDFC Bank">HDFC Bank</option>
-                  <option value="ICICI Bank">ICICI Bank</option>
-                  <option value="Axis Bank">Axis Bank</option>
-                  <option value="Kotak Mahindra Bank">Kotak Mahindra Bank</option>
-                  <option value="Citibank">Citibank</option>
-                </select>
+              <!-- Mobile / account (IMPS only) -->
+              <div class="form-group channel-fields hidden" data-for="IMPS">
+                <label>Mobile Number or Account Number</label>
+                <input type="text" id="f-mobile-or-account" placeholder="e.g. 9876543210" />
+                <small class="error-text" id="err-mobile-or-account"></small>
               </div>
-              <div class="form-group method-fields hidden" data-for="NETBANKING">
-                <label>Account Type</label>
-                <select id="f-bank-account-type">
-                  <option value="SAVINGS">Savings</option>
-                  <option value="CURRENT">Current</option>
-                </select>
+
+              <!-- SWIFT/BIC (SWIFT, WIRE_TRANSFER) -->
+              <div class="form-group channel-fields hidden" data-for="SWIFT,WIRE_TRANSFER">
+                <label>SWIFT/BIC Code</label>
+                <input type="text" id="f-swift-bic" placeholder="e.g. HSBCGB2LXXX" maxlength="11" />
+                <small class="error-text" id="err-swift-bic"></small>
+              </div>
+
+              <!-- Beneficiary country (SWIFT, WIRE_TRANSFER) -->
+              <div class="form-group channel-fields hidden" data-for="SWIFT,WIRE_TRANSFER">
+                <label>Beneficiary Country</label>
+                <select id="f-beneficiary-country"></select>
+              </div>
+
+              <!-- Payment purpose (SWIFT only) -->
+              <div class="form-group channel-fields hidden" data-for="SWIFT">
+                <label>Payment Purpose</label>
+                <select id="f-payment-purpose"></select>
+              </div>
+
+              <!-- Routing number (Wire Transfer only, optional) -->
+              <div class="form-group channel-fields hidden" data-for="WIRE_TRANSFER">
+                <label>Routing Number <span class="optional">(if applicable)</span></label>
+                <input type="text" id="f-routing-number" placeholder="e.g. 026009593" />
               </div>
 
               <div class="form-group span-2">
@@ -206,14 +245,80 @@
           </form>
         </div>
       </section>
+
+      <!-- ANALYTICS VIEW -->
+      <section id="view-analytics" class="view">
+        <header class="view-header">
+          <div>
+            <h1>Analytics</h1>
+            <p class="subtitle">Operational insights across all payment channels</p>
+          </div>
+          <span class="mock-badge hidden" id="analytics-mock-badge">Showing sample data — no payments yet</span>
+        </header>
+
+        <div class="kpi-grid" id="kpi-grid">
+          <div class="kpi-card"><span class="kpi-label">Total Payments</span><span class="kpi-value" id="kpi-total">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">Domestic Payments</span><span class="kpi-value" id="kpi-domestic">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">International Payments</span><span class="kpi-value" id="kpi-international">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">Successful Payments</span><span class="kpi-value" id="kpi-success">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">Failed Payments</span><span class="kpi-value" id="kpi-failed">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">Success Rate</span><span class="kpi-value" id="kpi-rate">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">Avg. Processing Time</span><span class="kpi-value" id="kpi-avg-time">—</span></div>
+          <div class="kpi-card"><span class="kpi-label">Total Transaction Value</span><span class="kpi-value" id="kpi-total-value">—</span></div>
+        </div>
+
+        <div class="analytics-grid">
+          <div class="chart-card span-2">
+            <div class="chart-title">Payment Volume Trend</div>
+            <canvas id="chart-volume" height="110"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Payment Type Distribution</div>
+            <canvas id="chart-type" height="180"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Payment Channel Distribution</div>
+            <canvas id="chart-channel" height="180"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Failure Analysis</div>
+            <div id="failure-list" class="failure-analysis-list"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Recent Processing Activity</div>
+            <div id="activity-list" class="activity-list"></div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
   <!-- Payment Details Modal -->
   <div class="modal-overlay" id="details-modal">
+
     <div class="modal">
       <button class="modal-close" id="close-details">×</button>
+      <div class="detail-tabs" id="detail-tabs">
+        <button type="button" class="detail-tab active" data-tab="details">Details</button>
+        <button type="button" class="detail-tab" data-tab="risk">Risk Assessment</button>
+        <button type="button" class="detail-tab" data-tab="audit">Audit Trail</button>
+      </div>
       <div id="details-content">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Duplicate Payment Confirmation Modal -->
+  <div class="modal-overlay" id="duplicate-modal">
+    <div class="modal modal-warning">
+      <button class="modal-close" id="close-duplicate">×</button>
+      <div class="duplicate-icon">⚠️</div>
+      <h2 class="duplicate-title">Potential Duplicate Payment</h2>
+      <p class="duplicate-message">A payment with similar details was recently submitted. Please verify whether you intend to create another payment.</p>
+      <div class="detail-grid" id="duplicate-card"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-duplicate">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-create-anyway">Create Anyway</button>
+      </div>
     </div>
   </div>
 
