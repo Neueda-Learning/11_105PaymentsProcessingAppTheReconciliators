@@ -53,7 +53,7 @@ services:
       - backend
 
     ports:
-      - "80:80"
+      - "8081:8081"
 
     networks:
       - springboot-network
