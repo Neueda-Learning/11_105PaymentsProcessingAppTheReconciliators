@@ -26,8 +26,10 @@ pipeline {
             steps {
                 sh """
                     docker run --rm \\
+                        -u \$(id -u):\$(id -g) \\
+                        -e HOME=/tmp \\
                         -v "\$(pwd)":/workspace \\
-                        -v maven-repo-cache:/root/.m2 \\
+                        -v maven-repo-cache:/tmp/.m2 \\
                         -w /workspace/${BACKEND_DIR} \\
                         maven:3.9-eclipse-temurin-17 \\
                         mvn -B clean verify
@@ -44,6 +46,8 @@ pipeline {
             steps {
                 sh """
                     docker run --rm \\
+                        -u \$(id -u):\$(id -g) \\
+                        -e HOME=/tmp \\
                         -v "\$(pwd)":/workspace \\
                         -w /workspace/${FRONTEND_DIR} \\
                         node:20-alpine \\
