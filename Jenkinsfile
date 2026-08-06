@@ -71,7 +71,14 @@ pipeline {
 
         stage('Deploy: Docker Compose') {
             steps {
-                sh 'docker compose up -d --build'
+                sh '''
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v "$(pwd)":/workspace \
+                        -w /workspace \
+                        docker/compose:latest \
+                        up -d --build
+                '''
             }
         }
     }
