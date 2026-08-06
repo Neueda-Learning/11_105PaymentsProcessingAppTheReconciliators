@@ -9,11 +9,6 @@ pipeline {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
     }
 
-    parameters {
-        booleanParam(name: 'PUSH_IMAGES', defaultValue: false, description: 'Push Docker images to registry')
-        booleanParam(name: 'DEPLOY', defaultValue: false, description: 'Run docker compose up -d after build')
-    }
-
     options {
         timestamps()
         skipDefaultCheckout(false)
@@ -65,9 +60,6 @@ pipeline {
         }
 
         stage('Docker: Push Images') {
-            when {
-                expression { params.PUSH_IMAGES }
-            }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'docker-registry-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
@@ -80,9 +72,6 @@ pipeline {
         }
 
         stage('Deploy: Docker Compose') {
-            when {
-                expression { params.DEPLOY }
-            }
             steps {
                 sh 'docker compose up -d --build'
             }
