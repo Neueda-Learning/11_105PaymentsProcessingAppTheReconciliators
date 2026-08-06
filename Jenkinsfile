@@ -72,12 +72,9 @@ pipeline {
         stage('Deploy: Docker Compose') {
             steps {
                 sh '''
-                    docker run --rm \
-                        -v /var/run/docker.sock:/var/run/docker.sock \
-                        -v "$(pwd)":/workspace \
-                        -w /workspace \
-                        docker/compose:latest \
-                        up -d --build
+                    curl -SL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 -o /tmp/docker-compose
+                    chmod +x /tmp/docker-compose
+                    /tmp/docker-compose up -d --build
                 '''
             }
         }
