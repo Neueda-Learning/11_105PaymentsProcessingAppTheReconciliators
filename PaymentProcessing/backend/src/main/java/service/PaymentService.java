@@ -3,32 +3,29 @@ package com.paymentProccessing.backend.service;
 import com.paymentProccessing.backend.dto.CreatePaymentRequest;
 import com.paymentProccessing.backend.dto.PageResponse;
 import com.paymentProccessing.backend.dto.PaymentResponse;
+import com.paymentProccessing.backend.dto.RiskAssessmentResponse;
 import com.paymentProccessing.backend.dto.StatusHistoryResponse;
-import com.paymentProccessing.backend.entity.FraudValidation;
 import com.paymentProccessing.backend.entity.Payment;
 import com.paymentProccessing.backend.entity.PaymentStatusHistory;
+import com.paymentProccessing.backend.entity.RiskAssessment;
 import com.paymentProccessing.backend.enums.ErrorCode;
 import com.paymentProccessing.backend.enums.FraudStatus;
 import com.paymentProccessing.backend.enums.PaymentMethod;
 import com.paymentProccessing.backend.enums.PaymentStatus;
 import com.paymentProccessing.backend.enums.RiskLevel;
-import com.paymentProccessing.backend.exception.FraudRiskBlockedException;
 import com.paymentProccessing.backend.exception.InvalidStatusTransitionException;
+import com.paymentProccessing.backend.exception.PaymentApiException;
 import com.paymentProccessing.backend.exception.PaymentNotFoundException;
-import com.paymentProccessing.backend.repository.FraudValidationRepository;
 import com.paymentProccessing.backend.repository.PaymentRepository;
 import com.paymentProccessing.backend.repository.PaymentStatusHistoryRepository;
+import com.paymentProccessing.backend.repository.RiskAssessmentRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -38,8 +35,8 @@ public class PaymentService {
     private final PaymentStatusHistoryRepository historyRepository;
     private final PaymentValidationService validationService;
     private final PaymentSimulationService simulationService;
-    private final RiskAssessmentService riskAssessmentService;
-    private final FraudValidationRepository fraudValidationRepository;
+    private final FraudDetectionService fraudDetectionService;
+    private final RiskAssessmentRepository riskAssessmentRepository;
 
     /**
      * Creates a new payment. If an idempotencyKey is supplied and a payment
@@ -57,67 +54,71 @@ public class PaymentService {
 
         validationService.validate(request);
 
-        // ---- Fraud / risk validation (server-side, cannot be bypassed by the client) ----
-        RiskAssessmentResult risk = riskAssessmentService.assess(request);
-        String candidateId = java.util.UUID.randomUUID().toString();
-
-        if (risk.getRiskLevel() == RiskLevel.HIGH) {
-            saveFraudValidation(candidateId, risk);
-            throw new FraudRiskBlockedException(risk.getRiskScore(), risk.getRiskLevel().name(), risk.getReasons());
-        }
-
         Payment payment = Payment.builder()
-                .id(candidateId)
+                .id(java.util.UUID.randomUUID().toString())
                 .idempotencyKey(request.getIdempotencyKey())
+                .customerId(request.getCustomerId() == null || request.getCustomerId().isBlank() ? "DEMO-CUSTOMER" : request.getCustomerId())
                 .amount(request.getAmount())
                 .currency(request.getCurrency().toUpperCase())
                 .sourceAccount(request.getSourceAccount())
                 .destinationAccount(request.getDestinationAccount())
                 .paymentMethod(request.getPaymentMethod())
+                .paymentType(request.getPaymentType())
                 .status(PaymentStatus.CREATED)
                 .reference(request.getReference())
-                .riskScore(risk.getRiskScore())
-                .riskLevel(risk.getRiskLevel())
-                .fraudStatus(risk.getRiskLevel() == RiskLevel.MEDIUM ? FraudStatus.FLAGGED : FraudStatus.CLEARED)
                 .build();
 
         applyMethodDetails(payment, request);
 
-        payment = paymentRepository.save(payment);
+        // ---- Fraud / risk screening (runs before the payment is even persisted) ----
+        FraudDetectionService.RiskAssessmentResult risk = fraudDetectionService.assess(payment);
+        payment.setRiskScore(risk.getScore());
+        payment.setRiskLevel(risk.getLevel());
 
-        recordHistory(payment, null, PaymentStatus.CREATED, "USER", "Payment created", "Payment Created");
+        String decision;
+        if (risk.getLevel() == RiskLevel.HIGH) {
+            payment.setFraudStatus(FraudStatus.BLOCKED);
+            payment.setStatus(PaymentStatus.FAILED);
+            payment.setErrorCode(ErrorCode.FRAUD_BLOCKED);
+            payment.setErrorMessage("Payment blocked due to high fraud risk.");
+            decision = "AUTO_BLOCKED";
+        } else if (risk.getLevel() == RiskLevel.MEDIUM) {
+            payment.setFraudStatus(FraudStatus.UNDER_REVIEW);
+            decision = "PENDING_REVIEW";
+        } else {
+            payment.setFraudStatus(FraudStatus.CLEARED);
+            decision = "AUTO_CLEARED";
+        }
 
         Payment saved = paymentRepository.save(payment);
 
-        saveFraudValidation(saved.getId(), risk);
+        RiskAssessment assessment = RiskAssessment.builder()
+                .payment(saved)
+                .riskScore(risk.getScore())
+                .riskLevel(risk.getLevel())
+                .triggeredRules(RiskAssessment.joinRules(risk.getTriggeredRules()))
+                .decision(decision)
+                .build();
+        riskAssessmentRepository.save(assessment);
 
-        simulationService.scheduleProcessing(saved.getId());
+        recordHistory(saved, null, saved.getStatus(), "USER", "Payment created");
+        recordAudit(saved, "Fraud validation completed", "FRAUD_ENGINE",
+                "Risk score " + risk.getScore() + "/100 (" + risk.getLevel() + ")");
+        recordAudit(saved, "Risk score generated", "FRAUD_ENGINE", String.join("; ", risk.getTriggeredRules()));
+
+        if (risk.getLevel() == RiskLevel.HIGH) {
+            recordAudit(saved, "Payment blocked due to fraud risk", "FRAUD_ENGINE",
+                    "Automatically blocked — risk score " + risk.getScore() + "/100");
+        } else if (risk.getLevel() == RiskLevel.MEDIUM) {
+            recordAudit(saved, "Payment flagged for review", "FRAUD_ENGINE",
+                    "Held for bank operator review — risk score " + risk.getScore() + "/100");
+        }
+
+        if (risk.getLevel() == RiskLevel.LOW) {
+            simulationService.scheduleProcessing(saved.getId());
+        }
 
         return PaymentResponse.from(saved);
-    }
-
-    /**
-     * Runs the same fraud/risk assessment used during payment creation without
-     * persisting anything - used by the POST /payments/validate-risk pre-check
-     * endpoint so the UI can show the risk result before the user confirms.
-     */
-    @Transactional(readOnly = true)
-    public RiskAssessmentResult assessRisk(CreatePaymentRequest request) {
-        return riskAssessmentService.assess(request);
-    }
-
-    private void saveFraudValidation(String paymentId, RiskAssessmentResult risk) {
-        if (risk.getReasons().isEmpty()) {
-            return;
-        }
-        for (String reason : risk.getReasons()) {
-            fraudValidationRepository.save(FraudValidation.builder()
-                    .paymentId(paymentId)
-                    .riskScore(risk.getRiskScore())
-                    .riskLevel(risk.getRiskLevel())
-                    .reason(reason)
-                    .build());
-        }
     }
 
     private void applyMethodDetails(Payment payment, CreatePaymentRequest request) {
@@ -178,8 +179,9 @@ public class PaymentService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<PaymentResponse> listPayments(PaymentStatus status, String search, Pageable pageable) {
-        Page<Payment> page = paymentRepository.search(status, (search == null || search.isBlank()) ? null : search, pageable);
+    public PageResponse<PaymentResponse> listPayments(PaymentStatus status, RiskLevel riskLevel, String search, String customerId, Pageable pageable) {
+        Page<Payment> page = paymentRepository.search(status, riskLevel, (search == null || search.isBlank()) ? null : search,
+                (customerId == null || customerId.isBlank()) ? null : customerId, pageable);
         List<PaymentResponse> content = page.getContent().stream().map(PaymentResponse::from).toList();
         return PageResponse.<PaymentResponse>builder()
                 .content(content)
@@ -199,6 +201,53 @@ public class PaymentService {
                 .toList();
     }
 
+    /** Latest fraud/risk assessment for a payment, for the Risk Assessment UI section. */
+    @Transactional(readOnly = true)
+    public RiskAssessmentResponse getRisk(String id) {
+        findOrThrow(id); // ensures 404 if missing
+        return riskAssessmentRepository.findTopByPaymentIdOrderByAssessmentTimestampDesc(id)
+                .map(RiskAssessmentResponse::from)
+                .orElseThrow(() -> new PaymentApiException(ErrorCode.PAYMENT_NOT_FOUND, "No risk assessment found for payment " + id));
+    }
+
+    /**
+     * Bank operator decision (APPROVE/REJECT) on a MEDIUM-risk payment that is
+     * currently held UNDER_REVIEW. Approving resumes normal processing;
+     * rejecting fails the payment permanently.
+     */
+    @Transactional
+    public PaymentResponse decideRisk(String id, String decision, String triggeredBy, String notes) {
+        Payment payment = findOrThrow(id);
+        if (payment.getFraudStatus() != FraudStatus.UNDER_REVIEW) {
+            throw new PaymentApiException(ErrorCode.INVALID_STATUS_TRANSITION,
+                    "Payment is not currently pending fraud review (fraudStatus=" + payment.getFraudStatus() + ")");
+        }
+
+        riskAssessmentRepository.findTopByPaymentIdOrderByAssessmentTimestampDesc(id).ifPresent(assessment -> {
+            assessment.setDecision("APPROVE".equalsIgnoreCase(decision) ? "APPROVED" : "REJECTED");
+            riskAssessmentRepository.save(assessment);
+        });
+
+        if ("APPROVE".equalsIgnoreCase(decision)) {
+            payment.setFraudStatus(FraudStatus.CLEARED);
+            Payment saved = paymentRepository.save(payment);
+            recordAudit(saved, "Payment approved after review", triggeredBy,
+                    notes != null && !notes.isBlank() ? notes : "Approved by bank operations after manual review");
+            simulationService.scheduleProcessing(saved.getId());
+            return PaymentResponse.from(saved);
+        } else {
+            PaymentStatus current = payment.getStatus();
+            payment.setFraudStatus(FraudStatus.BLOCKED);
+            payment.setStatus(PaymentStatus.FAILED);
+            payment.setErrorCode(ErrorCode.FRAUD_REJECTED);
+            payment.setErrorMessage("Payment rejected by operations team after fraud review.");
+            Payment saved = paymentRepository.save(payment);
+            recordHistory(saved, current, PaymentStatus.FAILED, triggeredBy,
+                    notes != null && !notes.isBlank() ? notes : "Rejected after fraud review");
+            return PaymentResponse.from(saved);
+        }
+    }
+
     /**
      * Manually / programmatically transition a payment's status, validating
      * against the allowed state machine and recording an audit entry.
@@ -206,12 +255,6 @@ public class PaymentService {
     @Transactional
     public PaymentResponse updateStatus(String id, PaymentStatus newStatus, String triggeredBy, String notes,
                                          ErrorCode errorCode, String errorMessage) {
-        return updateStatus(id, newStatus, triggeredBy, notes, errorCode, errorMessage, null);
-    }
-
-    @Transactional
-    public PaymentResponse updateStatus(String id, PaymentStatus newStatus, String triggeredBy, String notes,
-                                         ErrorCode errorCode, String errorMessage, String action) {
         Payment payment = findOrThrow(id);
         PaymentStatus current = payment.getStatus();
 
@@ -230,80 +273,32 @@ public class PaymentService {
         }
 
         Payment saved = paymentRepository.save(payment);
-        recordHistory(saved, current, newStatus, triggeredBy, notes, action != null ? action : defaultActionFor(newStatus));
+        recordHistory(saved, current, newStatus, triggeredBy, notes);
         return PaymentResponse.from(saved);
-    }
-
-    /**
-     * Resets a FAILED payment back to CREATED and reschedules processing,
-     * recording a "Retry Requested" audit event. Bypasses the normal state
-     * machine transition rules (same as the initial CREATED assignment does),
-     * since FAILED is otherwise a terminal state.
-     */
-    @Transactional
-    public PaymentResponse retryPayment(String id, String triggeredBy) {
-        Payment payment = findOrThrow(id);
-        if (payment.getStatus() != PaymentStatus.FAILED) {
-            throw new InvalidStatusTransitionException(payment.getStatus(), PaymentStatus.CREATED);
-        }
-        PaymentStatus previous = payment.getStatus();
-        payment.setRetryCount(payment.getRetryCount() + 1);
-        payment.setErrorCode(null);
-        payment.setErrorMessage(null);
-        payment.setStatus(PaymentStatus.CREATED);
-        Payment saved = paymentRepository.save(payment);
-        recordHistory(saved, previous, PaymentStatus.CREATED, triggeredBy,
-                "Retry #" + saved.getRetryCount() + " requested for failed payment", "Retry Requested");
-        simulationService.scheduleProcessing(saved.getId(), true);
-        return PaymentResponse.from(saved);
-    }
-
-    /**
-     * Checks whether a payment matching the same source/destination account,
-     * amount, currency and reference was created within the last 2 minutes
-     * (duplicate submission detection). Logs a "Duplicate Warning Triggered"
-     * audit event against the matched payment when found.
-     */
-    @Transactional
-    public Optional<PaymentResponse> checkDuplicate(String sourceAccount, String destinationAccount,
-                                                     BigDecimal amount, String currency, String reference) {
-        Instant cutoff = Instant.now().minus(2, ChronoUnit.MINUTES);
-        String normalizedRef = reference == null ? "" : reference.trim();
-        List<Payment> candidates = paymentRepository.findRecentMatching(
-                sourceAccount, destinationAccount, amount, currency.toUpperCase(), cutoff);
-        Optional<Payment> match = candidates.stream()
-                .filter(p -> normalizedRef.equals(p.getReference() == null ? "" : p.getReference().trim()))
-                .findFirst();
-        match.ifPresent(p -> recordHistory(p, p.getStatus(), p.getStatus(), "SYSTEM",
-                "New submission matched this payment's source/destination/amount/currency/reference within 2 minutes",
-                "Duplicate Warning Triggered"));
-        return match.map(PaymentResponse::from);
-    }
-
-    private String defaultActionFor(PaymentStatus status) {
-        return switch (status) {
-            case CREATED -> "Payment Created";
-            case VALIDATED -> "Validated";
-            case SENT -> "Sent";
-            case COMPLETED -> "Completed";
-            case FAILED -> "Failed";
-        };
     }
 
     @Transactional
     public void recordHistory(Payment payment, PaymentStatus from, PaymentStatus to, String triggeredBy, String notes) {
-        recordHistory(payment, from, to, triggeredBy, notes, defaultActionFor(to));
-    }
-
-    @Transactional
-    public void recordHistory(Payment payment, PaymentStatus from, PaymentStatus to, String triggeredBy, String notes, String action) {
         PaymentStatusHistory history = PaymentStatusHistory.builder()
                 .payment(payment)
                 .fromStatus(from)
                 .toStatus(to)
                 .triggeredBy(triggeredBy)
-                .action(action)
                 .notes(notes)
+                .build();
+        historyRepository.save(history);
+    }
+
+    /** Records a non-state-transition audit event (e.g. fraud/risk events) with a custom action label. */
+    @Transactional
+    public void recordAudit(Payment payment, String action, String triggeredBy, String notes) {
+        PaymentStatusHistory history = PaymentStatusHistory.builder()
+                .payment(payment)
+                .fromStatus(payment.getStatus())
+                .toStatus(payment.getStatus())
+                .triggeredBy(triggeredBy)
+                .notes(notes)
+                .actionOverride(action)
                 .build();
         historyRepository.save(history);
     }
@@ -312,4 +307,7 @@ public class PaymentService {
         return paymentRepository.findById(id).orElseThrow(() -> new PaymentNotFoundException(id));
     }
 }
+
+
+
 

@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS payments (
     currency              VARCHAR(3) NOT NULL,
     source_account        VARCHAR(34) NOT NULL,
     destination_account   VARCHAR(34) NOT NULL,
-    payment_method        VARCHAR(20) NOT NULL,
+    payment_method        VARCHAR(30) NOT NULL,
+    payment_type          VARCHAR(20) NOT NULL,
     status                VARCHAR(20) NOT NULL,
     reference             VARCHAR(255),
     upi_id                VARCHAR(100),
@@ -35,10 +36,6 @@ CREATE TABLE IF NOT EXISTS payments (
     routing_number        VARCHAR(30),
     error_code            VARCHAR(40),
     error_message         VARCHAR(500),
-    retry_count           INT NOT NULL DEFAULT 0,
-    risk_score            INT,
-    risk_level            VARCHAR(10),
-    fraud_status          VARCHAR(20),
     version               BIGINT,
     created_at            DATETIME(6) NOT NULL,
     updated_at            DATETIME(6) NOT NULL,
@@ -52,20 +49,9 @@ CREATE TABLE IF NOT EXISTS payment_status_history (
     from_status   VARCHAR(20),
     to_status     VARCHAR(20) NOT NULL,
     triggered_by  VARCHAR(50) NOT NULL,
-    action        VARCHAR(60) NOT NULL,
     notes         VARCHAR(500),
     changed_at    DATETIME(6) NOT NULL,
     INDEX idx_history_payment_id (payment_id),
     CONSTRAINT fk_history_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS fraud_validations (
-    validation_id     BIGINT AUTO_INCREMENT PRIMARY KEY,
-    payment_id        VARCHAR(36) NOT NULL,
-    risk_score         INT NOT NULL,
-    risk_level         VARCHAR(10) NOT NULL,
-    reason             VARCHAR(255) NOT NULL,
-    created_timestamp  DATETIME(6) NOT NULL,
-    INDEX idx_fraud_validation_payment_id (payment_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
