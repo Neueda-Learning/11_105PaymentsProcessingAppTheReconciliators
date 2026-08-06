@@ -69,18 +69,6 @@ pipeline {
             }
         }
 
-        stage('Docker: Push Images') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'docker-registry-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
-                    sh "docker push ${DOCKER_IMAGE_BACKEND}:${IMAGE_TAG}"
-                    sh "docker push ${DOCKER_IMAGE_BACKEND}:latest"
-                    sh "docker push ${DOCKER_IMAGE_FRONTEND}:${IMAGE_TAG}"
-                    sh "docker push ${DOCKER_IMAGE_FRONTEND}:latest"
-                }
-            }
-        }
-
         stage('Deploy: Docker Compose') {
             steps {
                 sh 'docker compose up -d --build'
@@ -94,9 +82,6 @@ pipeline {
         }
         failure {
             echo "Build ${env.BUILD_NUMBER} failed. Check the stage logs above."
-        }
-        always {
-            sh 'docker logout || true'
         }
     }
 }
