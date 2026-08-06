@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Opens on **http://localhost:5173**. Make sure the backend's
+Opens on **http://localhost**. Make sure the backend's
 `app.cors.allowed-origins` (in `application.properties`) includes this origin
 (already added).
 
