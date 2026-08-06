@@ -1,0 +1,101 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'JDK17'
+        maven 'Maven3'
+        nodejs 'Node20'
+    }
+
+    environment {
+        BACKEND_DIR   = "PaymentProcessing/backend"
+        FRONTEND_DIR  = "PaymentProcessing/frontend-react"
+        DOCKER_IMAGE_BACKEND  = "payments-backend"
+        DOCKER_IMAGE_FRONTEND = "payments-frontend"
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+    }
+
+    parameters {
+        booleanParam(name: 'PUSH_IMAGES', defaultValue: false, description: 'Push Docker images to registry')
+        booleanParam(name: 'DEPLOY', defaultValue: false, description: 'Run docker compose up -d after build')
+    }
+
+    options {
+        timestamps()
+        skipDefaultCheckout(false)
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Backend: Build & Test') {
+            steps {
+                dir("${BACKEND_DIR}") {
+                    sh 'mvn -B clean verify'
+                }
+            }
+            post {
+                always {
+                    junit testResults: "${BACKEND_DIR}/target/surefire-reports/*.xml", allowEmptyResults: true
+                }
+            }
+        }
+
+        stage('Frontend: Build') {
+            steps {
+                dir("${FRONTEND_DIR}") {
+                    sh 'npm ci'
+                    sh 'npm run build'
+                }
+            }
+        }
+
+        stage('Docker: Build Images') {
+            steps {
+                sh "docker build -t ${DOCKER_IMAGE_BACKEND}:${IMAGE_TAG} -t ${DOCKER_IMAGE_BACKEND}:latest ${BACKEND_DIR}"
+                sh "docker build -t ${DOCKER_IMAGE_FRONTEND}:${IMAGE_TAG} -t ${DOCKER_IMAGE_FRONTEND}:latest ${FRONTEND_DIR}"
+            }
+        }
+
+        stage('Docker: Push Images') {
+            when {
+                expression { params.PUSH_IMAGES }
+            }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-registry-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                    sh "docker push ${DOCKER_IMAGE_BACKEND}:${IMAGE_TAG}"
+                    sh "docker push ${DOCKER_IMAGE_BACKEND}:latest"
+                    sh "docker push ${DOCKER_IMAGE_FRONTEND}:${IMAGE_TAG}"
+                    sh "docker push ${DOCKER_IMAGE_FRONTEND}:latest"
+                }
+            }
+        }
+
+        stage('Deploy: Docker Compose') {
+            when {
+                expression { params.DEPLOY }
+            }
+            steps {
+                sh 'docker compose up -d --build'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Build ${env.BUILD_NUMBER} completed successfully."
+        }
+        failure {
+            echo "Build ${env.BUILD_NUMBER} failed. Check the stage logs above."
+        }
+        always {
+            sh 'docker logout || true'
+        }
+    }
+}

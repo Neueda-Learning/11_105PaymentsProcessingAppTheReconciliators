@@ -1,49 +1,66 @@
 version: "3.9"
 
 services:
-  mysql-db:
-    image: mysql:8.3
-    container_name: payments-mysql
-    restart: unless-stopped
+  mysql:
+    image: mysql:8.4
+    container_name: mysql_container
+    restart: always
+
     environment:
       MYSQL_ROOT_PASSWORD: n3u3da!
       MYSQL_DATABASE: payments_db
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: n3u3da!
+
     ports:
       - "3306:3306"
+
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./backend/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pn3u3da!"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      - mysql-data:/var/lib/mysql
+      - ./PaymentProcessing/backend/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
     networks:
-      - payments-net
+      - springboot-network
 
   backend:
     build:
-      context: ./backend
+      context: ./PaymentProcessing/backend
       dockerfile: Dockerfile
-    container_name: payments-backend
-    restart: unless-stopped
+    container_name: backend-container
+
     depends_on:
-      mysql-db:
-        condition: service_healthy
+      - mysql
+
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/payments_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/payments_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: admin
       SPRING_DATASOURCE_PASSWORD: n3u3da!
-    ports:
-      - "8080:8080"
-    networks:
-      - payments-net
 
-networks:
-  payments-net:
-    driver: bridge
+    ports:
+      - "8085:8085"
+
+    networks:
+      - springboot-network
+
+  frontend:
+    build:
+      context: ./PaymentProcessing/frontend-react
+      dockerfile: Dockerfile
+    container_name: frontend-container
+
+    depends_on:
+      - backend
+
+    ports:
+      - "5173:5173"
+
+    networks:
+      - springboot-network
 
 volumes:
-  mysql_data:
+  mysql-data:
+
+networks:
+  springboot-network:
 
