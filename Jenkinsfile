@@ -11,10 +11,16 @@ pipeline {
 
     options {
         timestamps()
-        skipDefaultCheckout(false)
+        skipDefaultCheckout(true)
     }
 
     stages {
+
+        stage('Fix Workspace Permissions') {
+            steps {
+                sh 'docker run --rm -v "$(pwd)":/workspace alpine:3.20 chown -R $(id -u):$(id -g) /workspace'
+            }
+        }
 
         stage('Checkout') {
             steps {
