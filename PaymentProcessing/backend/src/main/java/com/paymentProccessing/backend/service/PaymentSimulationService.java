@@ -42,11 +42,6 @@ public class PaymentSimulationService {
 
     @Async
     public void scheduleProcessing(String paymentId) {
-        scheduleProcessing(paymentId, false);
-    }
-
-    @Async
-    public void scheduleProcessing(String paymentId, boolean isRetry) {
         if (!enabled) {
             return;
         }
@@ -56,8 +51,7 @@ public class PaymentSimulationService {
             if (failNow) {
                 paymentService.updateStatus(paymentId, PaymentStatus.FAILED, "SIMULATOR",
                         "Validation failed during automated processing",
-                        ErrorCode.VALIDATION_FAILED, "Simulated validation failure",
-                        isRetry ? "Retry Failed" : null);
+                        ErrorCode.VALIDATION_FAILED, "Simulated validation failure");
                 return;
             }
             paymentService.updateStatus(paymentId, PaymentStatus.VALIDATED, "SIMULATOR",
@@ -67,8 +61,7 @@ public class PaymentSimulationService {
             if (shouldFail()) {
                 paymentService.updateStatus(paymentId, PaymentStatus.FAILED, "SIMULATOR",
                         "Failed while sending to destination network",
-                        ErrorCode.NETWORK_ERROR, "Simulated network failure while sending payment",
-                        isRetry ? "Retry Failed" : null);
+                        ErrorCode.NETWORK_ERROR, "Simulated network failure while sending payment");
                 return;
             }
             paymentService.updateStatus(paymentId, PaymentStatus.SENT, "SIMULATOR",
@@ -78,13 +71,11 @@ public class PaymentSimulationService {
             if (shouldFail()) {
                 paymentService.updateStatus(paymentId, PaymentStatus.FAILED, "SIMULATOR",
                         "Destination system rejected the payment",
-                        ErrorCode.PROCESSING_ERROR, "Simulated processing failure at destination",
-                        isRetry ? "Retry Failed" : null);
+                        ErrorCode.PROCESSING_ERROR, "Simulated processing failure at destination");
                 return;
             }
             paymentService.updateStatus(paymentId, PaymentStatus.COMPLETED, "SIMULATOR",
-                    "Payment confirmed by destination system", null, null,
-                    isRetry ? "Retry Successful" : null);
+                    "Payment confirmed by destination system", null, null);
         } catch (Exception ex) {
             log.error("Simulation failed for payment {}", paymentId, ex);
         }

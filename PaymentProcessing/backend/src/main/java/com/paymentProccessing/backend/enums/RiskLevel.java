@@ -1,10 +1,11 @@
 package com.paymentProccessing.backend.enums;
 
 /**
- * Fraud/risk classification assigned to a payment by the risk assessment engine.
+ * Fraud risk tier assigned to a payment by {@link com.paymentProccessing.backend.service.FraudDetectionService}.
  */
 public enum RiskLevel {
     LOW,
     MEDIUM,
     HIGH
 }
+

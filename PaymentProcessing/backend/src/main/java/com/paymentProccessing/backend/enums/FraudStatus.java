@@ -1,14 +1,15 @@
 package com.paymentProccessing.backend.enums;
 
 /**
- * Outcome of fraud/risk validation recorded against a payment.
- * CLEARED   - LOW risk, created normally.
- * FLAGGED   - MEDIUM risk, user confirmed and payment was created anyway.
- * BLOCKED   - HIGH risk, payment creation was rejected (never persisted as a Payment,
- *             but the attempt is still logged in the fraud_validations table).
+ * Outcome of fraud/risk screening for a payment.
+ *
+ * LOW risk    -&gt; CLEARED (payment proceeds automatically)
+ * MEDIUM risk -&gt; UNDER_REVIEW (held for a bank operations user to approve/reject)
+ * HIGH risk   -&gt; BLOCKED (payment is automatically failed/blocked, never sent)
  */
 public enum FraudStatus {
     CLEARED,
-    FLAGGED,
+    UNDER_REVIEW,
     BLOCKED
 }
+
