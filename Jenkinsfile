@@ -29,13 +29,14 @@ pipeline {
 
         stage('Backend: Build & Test') {
             steps {
-                script {
-                    docker.image('maven:3.9-eclipse-temurin-17').inside('-v $HOME/.m2:/root/.m2') {
-                        dir("${BACKEND_DIR}") {
-                            sh 'mvn -B clean verify'
-                        }
-                    }
-                }
+                sh """
+                    docker run --rm \\
+                        -v "\$(pwd)":/workspace \\
+                        -v maven-repo-cache:/root/.m2 \\
+                        -w /workspace/${BACKEND_DIR} \\
+                        maven:3.9-eclipse-temurin-17 \\
+                        mvn -B clean verify
+                """
             }
             post {
                 always {
@@ -46,14 +47,13 @@ pipeline {
 
         stage('Frontend: Build') {
             steps {
-                script {
-                    docker.image('node:20-alpine').inside {
-                        dir("${FRONTEND_DIR}") {
-                            sh 'npm ci'
-                            sh 'npm run build'
-                        }
-                    }
-                }
+                sh """
+                    docker run --rm \\
+                        -v "\$(pwd)":/workspace \\
+                        -w /workspace/${FRONTEND_DIR} \\
+                        node:20-alpine \\
+                        sh -c "npm ci && npm run build"
+                """
             }
         }
 
