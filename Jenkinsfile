@@ -1,12 +1,6 @@
 pipeline {
     agent any
 
-    tools {
-        jdk 'JDK17'
-        maven 'Maven3'
-        nodejs 'Node20'
-    }
-
     environment {
         BACKEND_DIR   = "PaymentProcessing/backend"
         FRONTEND_DIR  = "PaymentProcessing/frontend-react"
@@ -35,8 +29,12 @@ pipeline {
 
         stage('Backend: Build & Test') {
             steps {
-                dir("${BACKEND_DIR}") {
-                    sh 'mvn -B clean verify'
+                script {
+                    docker.image('maven:3.9-eclipse-temurin-17').inside('-v $HOME/.m2:/root/.m2') {
+                        dir("${BACKEND_DIR}") {
+                            sh 'mvn -B clean verify'
+                        }
+                    }
                 }
             }
             post {
@@ -48,9 +46,13 @@ pipeline {
 
         stage('Frontend: Build') {
             steps {
-                dir("${FRONTEND_DIR}") {
-                    sh 'npm ci'
-                    sh 'npm run build'
+                script {
+                    docker.image('node:20-alpine').inside {
+                        dir("${FRONTEND_DIR}") {
+                            sh 'npm ci'
+                            sh 'npm run build'
+                        }
+                    }
                 }
             }
         }
